@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 
-TEMPFILE=`mktemp`.nix
-
-echo '
-let
-    flake-compat = builtins.fetchTarball {
-        url = "https://github.com/edolstra/flake-compat/archive/master.tar.gz";
-    };
-in
-' > $TEMPFILE
-
 function usage {
     echo "
 $(tput bold)nix-option$(tput sgr0) [my flags] [option] [nixos-option flags]
@@ -19,6 +9,7 @@ $(tput bold)my flags$(tput sgr0)
         If this flag is omitted then nixos-option will have the default behavior
         Example: .#nixosConfigurations.main
     -h, --help: show this help message
+    --show-tmpfile, -s: show the path of the temporary file generated, useful with -n
     --no-delete-tmpfile, -n: do not delete the generated nix file
 
 $(tput bold)option$(tput sgr0)
@@ -33,6 +24,10 @@ if [ $# == 0 ]; then
     usage
     exit 0
 fi
+
+TEMPFILE=`mktemp`.nix
+
+echo "let flake-compat = $FLAKE_COMPAT; in" > "$TEMPFILE"
 
 function cleanup {
     if [ $DELETE_TMPFILE == 1 ]; then
@@ -54,11 +49,14 @@ while true; do
             shift
             DELETE_TMPFILE=0
         ;;
+        --show-tmpfile | -s)
+            shift
+            echo "$TEMPFILE"
+        ;;
         --flake)
             shift
             IFS='#' read -a FLAKE_PARTS <<< "$1"
             shift
-            echo "$FLAKE_PARTS"
             if [[ "${FLAKE_PARTS[0]}" =~ ^[./] ]]; then
                 DIR=`cd "${FLAKE_PARTS[0]}"; pwd`
                 echo "(import flake-compat {src = \"$DIR\";}).defaultNix.${FLAKE_PARTS[1]}" >> "$TEMPFILE"

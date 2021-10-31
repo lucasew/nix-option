@@ -5,13 +5,24 @@
 , makeWrapper
 , nixos-option
 , ncurses
+, fetchFromGitHub
 , version ? "undefined"
+, flake-compat ? null
 , ...
 }:
 let
   inherit (lib) makeBinPath;
-in
-stdenv.mkDerivation {
+  inherit (builtins) fetchTarball;
+
+  usedFlakeCompat = if flake-compat == null 
+    then fetchFromGitHub {
+      owner = "edolstra";
+      repo = "flake-compat";
+      rev = "12c64ca55c1014cdc1b16ed5a804aa8576601ff2";
+      sha256 = "sha256-hY8g6H2KFL8ownSiFeMOjwPC8P0ueXpCVEbxgda3pko=";
+    } else flake-compat;
+
+in stdenv.mkDerivation {
   pname = "nix-option";
   inherit version;
 
@@ -20,9 +31,9 @@ stdenv.mkDerivation {
   ];
 
   installPhase = ''
-    # mkdir -p $out/bin
     makeWrapper "${./nix-option}" "$out/bin/nix-option" \
-      --prefix PATH : "${makeBinPath [ nixos-option ncurses ]}"
+      --prefix PATH : "${makeBinPath [ nixos-option ncurses ]}" \
+      --prefix FLAKE_COMPAT : "${usedFlakeCompat}"
   '';
   dontUnpack = true;
 

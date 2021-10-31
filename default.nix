@@ -1,2 +1,2 @@
-{pkgs ? import <nixpkgs> {}}:
-pkgs.callPackage ./package.nix {}
+{pkgs ? import <nixpkgs> {}, ...}@args:
+pkgs.callPackage ./package.nix args
