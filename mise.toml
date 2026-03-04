@@ -1,0 +1,43 @@
+[tools]
+"github:lucasew/workspaced" = "0.1.6"
+
+[tasks.lint]
+run = "workspaced codebase lint"
+
+[tasks.fmt]
+run = "workspaced codebase format"
+
+[tasks.test]
+depends = ["test:*"]
+
+[tasks.codegen]
+depends = ["codegen:*"]
+
+[tasks.install]
+depends = ["install:*"]
+
+[tasks.ci]
+depends = ["lint", "test"]
+
+[tasks."test:dummy"]
+run = "echo 'No tests configured'"
+
+[tasks."codegen:dummy"]
+run = "echo 'No codegen configured'"
+
+[tasks."install:smart"]
+run = '''
+if [ -f "package-lock.json" ]; then
+  npm ci
+elif [ -f "yarn.lock" ]; then
+  yarn install --frozen-lockfile
+elif [ -f "pnpm-lock.yaml" ]; then
+  pnpm install --frozen-lockfile
+elif [ -f "Cargo.toml" ]; then
+  cargo fetch
+elif [ -f "go.mod" ]; then
+  go mod download
+else
+  echo 'No supported package manager detected.'
+fi
+'''
