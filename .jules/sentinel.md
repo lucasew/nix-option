@@ -1,0 +1,1 @@
+- 2026-03-20: [High] Insecure temporary file creation in bash scripts using concatenated strings after mktemp allows TOCTOU symlink attacks (CWE-377). Fix by using mktemp --suffix or securely creating a temporary directory.

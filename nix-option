@@ -25,13 +25,13 @@ if [ $# == 0 ]; then
     exit 0
 fi
 
-TEMPFILE=`mktemp`.nix
+TEMPFILE=$(mktemp "${TMPDIR:-/tmp}/nix-option.XXXXXX.nix")
 
 echo "let flake-compat = $FLAKE_COMPAT; in" > "$TEMPFILE"
 
 function cleanup {
-    if [ $DELETE_TMPFILE == 1 ]; then
-        rm "$TEMPFILE"
+    if [ "$DELETE_TMPFILE" = "1" ]; then
+        rm -f "$TEMPFILE"
     fi
 }
 trap cleanup EXIT
