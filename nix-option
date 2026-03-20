@@ -71,8 +71,8 @@ while true; do
     esac
 done
 
-if [ $FLAKED == 1 ]; then
-    nixos-option --config_expr "(import $TEMPFILE).config" --options_expr "(import "$TEMPFILE").options" "$@"
+if [ "$FLAKED" = "1" ]; then
+    nixos-option --config_expr "(import \"$TEMPFILE\").config" --options_expr "(import \"$TEMPFILE\").options" "$@"
 else
     nixos-option "$@"
 fi
