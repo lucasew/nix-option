@@ -1,0 +1,6 @@
+[tools]
+shellcheck = "0.10.0"
+
+[tasks]
+ci = "shellcheck nix-option"
+test = "shellcheck nix-option"

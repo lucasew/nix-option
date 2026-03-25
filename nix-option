@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
-function usage {
+set -eo pipefail
+
+function report_error {
+    echo "ERROR: $*" >&2
+}
+
+function show_usage {
     echo "
 $(tput bold)nix-option$(tput sgr0) [my flags] [option] [nixos-option flags]
 
@@ -20,60 +26,138 @@ $(tput bold)nixos-option flags$(tput sgr0)
     "
 }
 
-if [ $# == 0 ]; then
-    usage
+if [[ $# -eq 0 ]]; then
+    show_usage
     exit 0
 fi
 
-TEMPFILE=`mktemp`.nix
+# Global variables replaced by script-level state constants
+DELETE_TMPFILE=true
+FLAKED=false
+TEMPDIR=""
+TEMPFILE=""
+SHOW_TMPFILE=false
 
-echo "let flake-compat = $FLAKE_COMPAT; in" > "$TEMPFILE"
+function initialize_tempfile {
+    if [[ -n "$TEMPFILE" ]]; then
+        return
+    fi
+    # Extract Method: Creates temp directory securely to prevent race conditions
+    TEMPDIR=$(mktemp -d -t nix-option.XXXXXX)
+    TEMPFILE="${TEMPDIR}/flake.nix"
+
+    echo "let flake-compat = ${FLAKE_COMPAT:-}; in" > "$TEMPFILE"
+}
 
 function cleanup {
-    if [ $DELETE_TMPFILE == 1 ]; then
-        rm "$TEMPFILE"
+    if [[ "$DELETE_TMPFILE" == "true" && -n "$TEMPDIR" && -d "$TEMPDIR" ]]; then
+        rm -rf "$TEMPDIR"
     fi
 }
 trap cleanup EXIT
 
-DELETE_TMPFILE=1
-FLAKED=0
+function parse_and_generate_flake {
+    # Extract Method: Handles parsing of flake string and generating the nix expression
+    local flake_arg="$1"
+    local flake_dir
+    local flake_attr
 
-while true; do
-    case "$1" in
-        --help | -h)
-            usage
-            exit 0
-        ;;
-        --no-delete-tmpfile | -n)
-            shift
-            DELETE_TMPFILE=0
-        ;;
-        --show-tmpfile | -s)
-            shift
-            echo "$TEMPFILE"
-        ;;
-        --flake)
-            shift
-            IFS='#' read -a FLAKE_PARTS <<< "$1"
-            shift
-            if [[ "${FLAKE_PARTS[0]}" =~ ^[./] ]]; then
-                DIR=`cd "${FLAKE_PARTS[0]}"; pwd`
-                echo "(import flake-compat {src = \"$DIR\";}).defaultNix.${FLAKE_PARTS[1]}" >> "$TEMPFILE"
-            else
-                echo "(import flake-compat {src = \"${FLAKE_PARTS[0]}\";}).defaultNix.${FLAKE_PARTS[1]}" >> "$TEMPFILE"
-            fi
-            FLAKED=1
-        ;;
-        *)
-            break
-        ;;
-    esac
-done
+    IFS='#' read -r -a FLAKE_PARTS <<< "$flake_arg"
+    flake_dir="${FLAKE_PARTS[0]}"
+    flake_attr="${FLAKE_PARTS[1]:-}"
 
-if [ $FLAKED == 1 ]; then
-    nixos-option --config_expr "(import $TEMPFILE).config" --options_expr "(import "$TEMPFILE").options" "$@"
-else
-    nixos-option "$@"
-fi
+    if [[ "$flake_dir" =~ ^[./] ]]; then
+        flake_dir=$(cd "$flake_dir" || { report_error "Failed to cd into $flake_dir"; exit 1; }; pwd)
+    fi
 
+    generate_nix_expression "$flake_dir" "$flake_attr"
+}
+
+function generate_nix_expression {
+    # Extract Method: Single Responsibility for writing to the Nix expression file
+    local flake_dir="$1"
+    local flake_attr="$2"
+
+    if [[ -n "$flake_attr" ]]; then
+        echo "(import flake-compat {src = \"$flake_dir\";}).defaultNix.${flake_attr}" >> "$TEMPFILE"
+    else
+        echo "(import flake-compat {src = \"$flake_dir\";}).defaultNix" >> "$TEMPFILE"
+    fi
+}
+
+function parse_arguments {
+    # Extract Method: Gathers argument parsing to reduce cyclomatic complexity in main body
+    local args=("$@")
+    local i=0
+    local remaining_args=()
+
+    while [[ $i -lt ${#args[@]} ]]; do
+        case "${args[$i]}" in
+            --help | -h)
+                show_usage
+                exit 0
+                ;;
+            --no-delete-tmpfile | -n)
+                DELETE_TMPFILE=false
+                ;;
+            --show-tmpfile | -s)
+                SHOW_TMPFILE=true
+                ;;
+            --flake)
+                initialize_tempfile
+
+                i=$((i + 1))
+                if [[ $i -ge ${#args[@]} ]]; then
+                    report_error "--flake requires an argument"
+                    exit 1
+                fi
+                parse_and_generate_flake "${args[$i]}"
+                FLAKED=true
+                ;;
+            *)
+                remaining_args+=("${args[$i]}")
+                ;;
+        esac
+        i=$((i + 1))
+    done
+
+    REMAINING_ARGS=("${remaining_args[@]}")
+}
+
+function execute_nixos_option {
+    # Extract Method: Isolates the execution logic
+    if [[ "$SHOW_TMPFILE" == "true" ]]; then
+        initialize_tempfile
+        echo "$TEMPFILE"
+    fi
+
+    if [[ "$FLAKED" == "true" ]]; then
+        if [[ -z "$TEMPFILE" ]]; then
+            report_error "Flake specified but tempfile not created."
+            exit 1
+        fi
+
+        # We quote properly to fix shellcheck SC2027 and SC2086
+        nixos-option --config_expr "(import \"$TEMPFILE\").config" --options_expr "(import \"$TEMPFILE\").options" "${REMAINING_ARGS[@]}"
+    else
+        # If there are no remaining args and we are not a flake, usage is printed above in main
+        # But if it's executed, nixos-option without args will just fail or run.
+        if [[ ${#REMAINING_ARGS[@]} -gt 0 || "$SHOW_TMPFILE" == "false" ]]; then
+             nixos-option "${REMAINING_ARGS[@]}"
+        fi
+    fi
+}
+
+function main {
+    parse_arguments "$@"
+
+    # Check if there are remaining args if needed, or just let nixos-option handle it
+    if [[ ${#REMAINING_ARGS[@]} -eq 0 && "$FLAKED" == "false" && "$SHOW_TMPFILE" == "false" ]]; then
+        show_usage
+        exit 0
+    fi
+
+    execute_nixos_option
+}
+
+main "$@"
